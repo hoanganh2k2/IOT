@@ -9,8 +9,10 @@ WiFiClient wifiClient;
 const char *ssid = "IoT";
 const char *password = "68686868";
 
-//Web/Server address to read/write from 
+// Cấu hình server 
 const char *host = "192.168.206.1";   
+const int   serverPort   = 81;  // Cổng của server
+const char *postEndpoint = "/iotproject/postdemo.php";
 
 //=======================================================================
 //   =======================================================================
@@ -31,15 +33,18 @@ int value, real_value;
 void setup() {
   delay(1000);
   Serial.begin(9600);
-  WiFi.mode(WIFI_OFF);        //Ngăn chặn sự cố kết nối lại (mất quá nhiều thời gian để kết nối)
-  delay(1000);
-  WiFi.mode(WIFI_STA);        //Dòng này ẩn việc xem ESP là điểm phát wifi
-  
-  WiFi.begin(ssid, password);     //Kết nối với bộ định tuyến WiFi của bạn
-  Serial.println("");
 
+  // Tắt chế độ Access Point và chuyển sang chế độ Station
+  WiFi.mode(WIFI_OFF);
+  delay(1000);
+  WiFi.mode(WIFI_STA);
+
+  // Kết nối tới WiFi
+  WiFi.begin(ssid, password);
+  Serial.println();
   Serial.print("Connecting");
-  // Wait for connection
+
+  // Đợi kết nối
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -50,10 +55,8 @@ void setup() {
   Serial.print("Connected to ");
   Serial.println(ssid);
   Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());  //Địa chỉ IP được gán cho ESP của bạn
-  // đặt mã thiết lập của bạn ở đây, để chạy một lần:
-  // Mở cổng Serial ở mức 9600
-  Serial.begin(9600);
+  Serial.println(WiFi.localIP());  //Địa chỉ IP được gán cho ESP
+
   // Dùng chân D1-GPIO5 dể làm cổng đọc digital, còn chân A0 vào thì không cần khai báo
   pinMode(ledr,OUTPUT);
   pinMode(ledy,OUTPUT);
@@ -63,23 +66,25 @@ void setup() {
 }
 
 void loop() {
-  
-  // Đặt mã chính của bạn ở đây để chạy lặp lại:
-  // Dùng hàm for để cộng dồn 10 lần đọc giá trị của cảm biến, sau đó lấy trung bình để được giá trị chính xác nhất
-  for(int i = 0; i <=9; i++){
+  real_value = 0;
+  // Lấy giá trị trung bình của 10 lần để được giá trị chính xác nhất
+  for(int i = 0; i <10; i++){
     real_value += analogRead(A0);
+    delay(10);
   }
   value = real_value/10;
-// Đặt lại giá trị 0 để cho vòng lặp mới 
-  real_value = 0;
+
 // Set thang giá trị đàu và giá trị cuối để đưa giá trị về thang từ 0 - 100.
   int percent = map(value, 432, 1023, 0, 100);
   // Tính giá trị phần trăm thực. Chuyển điện thế từ 3.3v (khô) thành 3.3v (ẩm)
   percent = 100 - percent;
+
   Serial.print("Độ ẩm là: ");
   Serial.print(percent);
   Serial.println('%');
+
   int status_rain = digitalRead(cbmua);
+
   if(status_rain == LOW){
     digitalWrite(ledr, LOW);
     digitalWrite(ledg, LOW);
@@ -87,7 +92,7 @@ void loop() {
     digitalWrite(relay,LOW);
     Serial.println("Trời đang mưa");
   }else{
-     Serial.println("Trời không mưa");
+    Serial.println("Trời không mưa");
     if(percent < 60){
       digitalWrite(ledr, HIGH);
       digitalWrite(ledg, LOW);
@@ -106,42 +111,48 @@ void loop() {
       digitalWrite(ledr, LOW);
       digitalWrite(ledg, HIGH);
       digitalWrite(ledy, LOW);
-      digitalWrite(relay,LOW);
-      Serial.println("Độ ẩm bình thường, máy bơm không hoạt động");
+      if(digitalRead(relay) == LOW)
+        Serial.println("Độ ẩm bình thường, máy bơm không hoạt động");
+      else 
+        Serial.println("Độ ẩm bình thường, máy bơm đang hoạt động");
     }
   }
 
   Serial.print("Giá trị analog: ");
   Serial.print(value);
-  Serial.print(" && ");
-  Serial.print("Giá trị digital: ");
-  Serial.println(digitalRead(5));
+  Serial.print(" && Giá trị digital (ledr): ");
+  Serial.println(digitalRead(ledr));
   delay(1000);
 
-    HTTPClient http;    //Khai báo đối tượng của lớp HTTPClient
+  HTTPClient http;    //Khai báo đối tượng của lớp HTTPClient
 
   String ADCData, station, maybom, postData;
 
-  station = status_rain;
+  // trạng thái máy bơm
   if(digitalRead(relay) == LOW) maybom = "Máy bơm đang tắt";
   else maybom = "Máy bơm đang bật";
 
+  // trạng thái mưa
   if(status_rain == HIGH) station = "Trời không mưa";
   else station = "Trời đang mưa";
 
   // //Đăng dữ liệu
   postData = "doam=" + String(percent) + "&trangthaimua=" + station + "&trangthaibom=" + maybom;
   Serial.println(postData);
-  http.begin(wifiClient, "http://192.168.206.1:81/iotproject/postdemo.php");              //Chỉ định đích yêu cầu
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");    //Chỉ định tiêu đề kiểu nội dung
+
+  String url = "http://" + host + ":" + String(serverPort) + postEndpoint; //http://192.168.206.1:81/iotproject/postdemo.php
+  http.begin(wifiClient, url);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
   int httpCode = http.POST(postData);   //Gửi yêu cầu
   String payload = http.getString();    //Nhận tải trọng phản hồi
 
-  Serial.println(httpCode);   //In mã trả về HTTP
-  Serial.println(payload);    //In tải trọng phản hồi yêu cầu
+  Serial.print("HTTP code: ");
+  Serial.println(httpCode);
+  Serial.print("Response: ");
+  Serial.println(payload);
 
-  http.end();  //Đóng kết nối
+  http.end();
   
-  delay(3000);  //Đăng dữ liệu cứ sau 3 giây
+  delay(3000);
 }
